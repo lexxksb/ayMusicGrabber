@@ -1,12 +1,13 @@
 const puppeteer = require('puppeteer');
 const fs = require("fs");
+const fsExt = require("fs-extra");
 const axios = require('axios');
 require('dotenv').config();
 let browser;
 let page;
-let start_record = false;
 let trackName = '';
 let artistName = '';
+let mp3Path = './' + (process.env.MP3PATH || 'mp3') + '/';
 
 (async () => {
     browser = await puppeteer.launch({
@@ -19,29 +20,29 @@ let artistName = '';
     page.on('request', async (request) => {
         if (request.resourceType() === 'media') {
 
-            if (start_record) {
+            let filePath = mp3Path + '(' + artistName + ') ' + trackName + '.mp3';
 
-                let filePath = './mp3/(' + artistName + ') ' + trackName + '.mp3';
+            axios({
+                url: request.url(),
+                method: 'GET',
+                responseType: 'stream', // important
+            }).then((response) => {
+                response.data.pipe(fs.createWriteStream(filePath));
+                console.log('success download');
+            }).catch(error => {
+                console.log(error);
+            });
 
-                axios({
-                    url: request.url(),
-                    method: 'GET',
-                    responseType: 'stream', // important
-                }).then((response) => {
-                    response.data.pipe(fs.createWriteStream(filePath));
-                    console.log('success download');
-                }).catch(error => {
-                    console.log(error);
-                });
-
-                console.log(trackName, artistName, request.url());
-            }
+            console.log(filePath);
         }
         request.continue();
     });
 
 })()
     .then(async () => {
+
+        fsExt.removeSync(mp3Path);
+        fsExt.ensureDirSync(mp3Path);
 
         await page.goto(process.env.PLAYLIST + '');
 
@@ -55,16 +56,16 @@ let artistName = '';
                 const trackNameElem = await trackElems[i].$('div.d-track__quasistatic-column > div > a');
                 trackName = await (await trackNameElem.getProperty('innerText')).jsonValue();
 
+                const trackNameElemSecond = await trackElems[i].$('div.d-track__quasistatic-column > div > span');
+                if (trackNameElemSecond) {
+                    trackName = trackName + ' ' + await (await trackNameElemSecond.getProperty('innerText')).jsonValue();
+                }
+
                 const artistNameElem = await trackElems[i].$('div.d-track__overflowable-column > div.d-track__overflowable-wrapper > div > span > a');
                 artistName = await (await artistNameElem.getProperty('innerText')).jsonValue();
 
-                start_record = true;
-
                 await trackElems[i].evaluate(el => el.querySelector('div.d-track__start-column > div.d-track__play.d-track__hover > span > button').click());
-
                 await page.waitFor(1000);
-
-                start_record = false;
             }
         }
 
